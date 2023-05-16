@@ -77,7 +77,7 @@ class RNAQUBO():
 
                         start = time.time()
                         stems_p = self.rna_data[rna_name]['potential_stems']
-                        pks_p = potential_pseudoknots(stems_p[0], pkp_penalty)
+                        pks_p = self._potential_pseudoknots(stems_p[0], pkp_penalty)
                         ols_p = self._potential_overlaps(stems_p[0])
                         qubo_data = self._model(stems_p[0], pks_p, ols_p, stems_p[1])
                         qubo_raw = dimod.BinaryQuadraticModel(qubo_data[0], qubo_data[1], vartype = 'BINARY')
@@ -88,6 +88,7 @@ class RNAQUBO():
                         self.models[rna_name]['model_qubo']["qc"][model_name]["qubo"] = qubo
                         self.models[rna_name]['model_qubo']["qc"][model_name]["time"] = end-start
                         self.models[rna_name]['model_qubo']["qc"][model_name]["model_name"] = model_name
+                        self.models[rna_name]['model_qubo']["qc"][model_name]["potential_pseudoknots"] = pks_p
     #                 
     #                 # # optimize results
     #                 # self.model_qubo["pre-calc"][model_name]["optimizer"] = {}
@@ -179,6 +180,32 @@ class RNAQUBO():
                 overlaps_potential.append(overlap)
                 
         return overlaps_potential
+    
+    def _potential_pseudoknots(self, stems_potential, pkp):
+
+        pseudoknots_potential = []
+        pseudoknot_penalty = pkp
+
+        for i in range(len(stems_potential)):
+            for j in range(i + 1, len(stems_potential)):
+
+                stem1 = stems_potential[i]
+                stem2 = stems_potential[j]
+
+                i_a = stem1[0]
+                j_a = stem1[1]
+                i_b = stem2[0]
+                j_b = stem2[1]
+
+                pseudoknot = [i,j,1]
+
+                if (i_a < i_b and i_b < j_a and j_a < j_b) or (i_b < i_a and i_a < j_b and j_b < j_a):
+
+                    pseudoknot[2] = pseudoknot_penalty
+
+                pseudoknots_potential.append(pseudoknot)
+
+        return pseudoknots_potential
 
     # function to generate the Hamiltonian of a given RNA structure from potential stems, overlaps, and pseudoknots:
 
