@@ -1,0 +1,9 @@
+prefix=/home/rco/Desktop/projects/qfold/quantum-computing-exploration-for-drug-discovery-on-aws/source/src/notebook/healthcare-and-life-sciences/c-1-protein-folding-quantum-random-walk/quantum-random-walk/psi4/psi4conda
+libdir=${prefix}/lib
+includedir=${prefix}/include
+
+Name: mctc-gcp
+Description: Geometrical counterpoise correction
+Version: 2.3.1
+Libs: -L${libdir} -lmctc-gcp
+Cflags: -I${includedir}

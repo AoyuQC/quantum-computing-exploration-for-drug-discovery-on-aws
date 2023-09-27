@@ -1,10 +1,12 @@
+import subprocess
+import numpy as np
 from copy import Error
 
 import molecular_model.atom
 
 class Molecule_Analizer():
 
-    def __init__(self, protein_name, aminoacids, protein_id, input_filename, output_filename, basis, energy_method):
+    def __init__(self, protein_name, aminoacids, input_filename, output_filename, basis, energy_method, protein_id=-1):
 
         self.protein_name = protein_name
         self.aminoacids = aminoacids
@@ -41,7 +43,7 @@ class Molecule_Analizer():
         self.execute_psi_command()
 
         #read/parse outputfile
-        [atoms, protein_id] = self.parsePsiOutputFile()
+        [atoms, protein_id] = self.parse_psi_output_file()
 
         # if protein_id is not -1 means that psi4 was not able to find the protein but multiples ids for the protein
         # the solution is to create an input file with the name and the id
@@ -71,11 +73,72 @@ class Molecule_Analizer():
 
         inputFile.close()
 
-    def execute_psi_command():
+    def execute_psi_command(self):
 
         # execute psi4 by command line (it generates the file output.dat with the information)
-        return NotImplementedError
-    
+        subprocess.run(['./psi4/psi4conda/bin/psi4','-n', str(8), self.input_filename+".dat", self.output_filename+".dat"], stdout=subprocess.DEVNULL)
+
+    def main_chain_builder(self, nitrogen_starts, aminoacids):
+        '''Takes all the nitrogens that are only connected to a single C and returns the backbone of the protein'''
+        best_chains = []
+        len_best_chain = 0
+        for nitro in nitrogen_starts:
+            candidate_chain = []
+            nit = nitro
+
+            for amino_index in range(len(aminoacids)):
+
+                aminolist = []
+                aminolist.append(nit)
+
+                # Searching for C-alpha
+                carbons = nit.linked_to_dict['C']
+                carbons_not_in_chain = [carbon for carbon in carbons if (carbon not in candidate_chain and carbon not in aminolist)]
+                if (len(carbons_not_in_chain)==1 and aminoacids[amino_index] != 'P'):
+                    car_alpha = carbons_not_in_chain[0]
+                    aminolist.append(car_alpha)
+                elif (len(carbons_not_in_chain)==2 and aminoacids[amino_index] == 'P'):
+                    car_alpha = (carbons_not_in_chain[0] if (len(carbons_not_in_chain[0].linked_to_dict['N']) == 1 and len(carbons_not_in_chain[0].linked_to_dict['C']) == 2 and len(carbons_not_in_chain[0].linked_to_dict['H']) == 1) else carbons_not_in_chain[1])
+                    aminolist.append(car_alpha)
+                else:
+                    break
+
+                # Searching for Carboxy
+                carbons = car_alpha.linked_to_dict['C']
+                carboxys_not_in_chain = [carbon for carbon in carbons if (carbon not in candidate_chain and carbon not in aminolist and len(carbon.linked_to_dict['O']) > 0)]
+                if amino_index+1 < len(aminoacids):
+                    carboxys_not_in_chain = [carbox for carbox in carboxys_not_in_chain if len(carbox.linked_to_dict['N']) > 0]
+                if len(carboxys_not_in_chain)==1:
+                    carbox = carboxys_not_in_chain[0]
+                    aminolist.append(carbox)
+                else:
+                    break
+
+                #We have a full aminoacid, so we save it to the candidate list
+                candidate_chain += aminolist
+
+                # Searching for next aminoacid Nitrogen
+                nitrogens = carbox.linked_to_dict['N']
+                nitrogens_not_in_chain = [n for n in nitrogens if (n not in candidate_chain and n not in aminolist)]
+                if len(nitrogens_not_in_chain)==1:
+                    nit = nitrogens_not_in_chain[0]
+                else:
+                    break
+
+            # Is the found chain longer than the one we already had?
+            if len(candidate_chain) > len_best_chain:
+                len_best_chain = len(candidate_chain)
+                best_chains = [candidate_chain]
+            elif len(candidate_chain) == len_best_chain:
+                best_chains.append(candidate_chain)
+            else: 
+                pass
+
+        if len(best_chains) != 1 or len(best_chains[0])//3 != len(aminoacids):
+            raise ValueError('There should be a single lengthy chain!', best_chains, nitrogen_starts)
+        else:
+            return best_chains[0]
+
     def parse_psi_output_file(self):
 
         atomId = 0
@@ -109,6 +172,9 @@ class Molecule_Analizer():
                     isInfoLine = True
                         
         return [atoms, protein_id]
+    
+    def distance(self, atom, atom2):
+        return np.sqrt((atom.x-atom2.x)**2+(atom.y-atom2.y)**2+(atom.z-atom2.z)**2)
     
     def calculate_atom_connection(self, atoms):
 

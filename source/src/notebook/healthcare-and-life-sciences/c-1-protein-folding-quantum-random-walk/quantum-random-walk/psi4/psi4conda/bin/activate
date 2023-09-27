@@ -1,0 +1,6 @@
+#!/bin/sh
+_CONDA_ROOT="/home/rco/Desktop/projects/qfold/quantum-computing-exploration-for-drug-discovery-on-aws/source/src/notebook/healthcare-and-life-sciences/c-1-protein-folding-quantum-random-walk/quantum-random-walk/psi4/psi4conda"
+# Copyright (C) 2012 Anaconda, Inc
+# SPDX-License-Identifier: BSD-3-Clause
+\. "$_CONDA_ROOT/etc/profile.d/conda.sh" || return $?
+conda activate "$@"
