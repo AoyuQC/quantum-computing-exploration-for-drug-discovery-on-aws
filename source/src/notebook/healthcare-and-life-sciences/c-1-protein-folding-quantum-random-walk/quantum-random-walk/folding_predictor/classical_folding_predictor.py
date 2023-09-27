@@ -1,6 +1,9 @@
 import copy
 import math
+import time
+import datetime
 import numpy as np
+
 from scipy.stats import vonmises
 
 class Classical_Folding_Predictor():
@@ -23,6 +26,8 @@ class Classical_Folding_Predictor():
 
     def classical_calculate_3D_structure(self, nW):
 
+        time_start = time.time()
+
         probabilities_matrix = {}
         for _ in range(self.n_iterations):
             
@@ -39,6 +44,8 @@ class Classical_Folding_Predictor():
                 probabilities_matrix[position_angles] += (1/self.n_iterations) 
             else:
                 probabilities_matrix[position_angles] = (1/self.n_iterations)
+
+        print("<i> Classical Metropolis =>", nW, "steps calculated in", str(datetime.timedelta(seconds=time.time() - time_start)), "(hh:mm:ss)")
 
         return probabilities_matrix
 

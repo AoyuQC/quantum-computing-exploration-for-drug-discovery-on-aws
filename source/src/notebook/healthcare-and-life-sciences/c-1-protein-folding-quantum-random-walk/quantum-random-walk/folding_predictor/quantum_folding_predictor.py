@@ -1,123 +1,388 @@
+import math
 import time
+import itertools
 import numpy as np
+import datetime
 
-from itertools import product
-from collections import OrderedDict
+from scipy.stats import vonmises
 
 from qiskit.circuit import QuantumRegister
 from qiskit.quantum_info import Statevector
-from qiskit import QuantumCircuit, Aer, execute
+from qiskit import QuantumCircuit, execute, Aer
 
-import deltas_oracle
-
+from . import oracle
+from . import initializer_coords_superposition
 
 class Quantum_Folding_Predictor():
 
-    def __init__(self, n_angles, bits_to_discretize, ancilla_bits, input_oracle):
+    def __init__(self, n_angles, bits_to_discretize, ancilla_bits, input_oracle, beta_value, beta_type):
         
         self.n_angles = n_angles
         self.angle_precision_bits = bits_to_discretize
-        self.move_id_len = int(np.ceil(np.log2(n_angles)))
+        self.move_id_len = max(int(np.ceil(np.log2(n_angles/2))),1)+1
         self.ancilla_bits = ancilla_bits
         self.input_oracle = input_oracle
+        self.beta_value = beta_value
+        self.beta_type = beta_type
 
     def quantum_calculate_3D_structure(self, nW):
 
-        # State definition. All angles range from 0 to 2pi
+        time_start = time.time()
 
-        g_angles = []
-        for i in range(self.n_angles):
-            g_angles.append(QuantumRegister(self.angle_precision_bits, name = 'angle' + str(i)))
+        # State definition. All coords range from 0 to 2pi
+        coords = [QuantumRegister(self.angle_precision_bits, name = 'coord_' + str(i)) for i in range(self.n_angles)]
+        move_id = QuantumRegister(self.move_id_len, name = 'move_id')
+        move_value = QuantumRegister(1, name = 'move_value')
+        coin = QuantumRegister(1, name = 'coin')
+        ancilla = QuantumRegister(self.ancilla_bits, name = 'ancilla')
 
-        # Move proposal
-        g_move_id = QuantumRegister(self.move_id_len, name = 'move_id') #Which angle are we modifying
-        g_move_value = QuantumRegister(1, name = 'move_value') #0 -> decrease the angle. 1-> increase it
-
-        # Coin
-        g_coin = QuantumRegister(1, name = 'coin')
-
-        # Ancillas
-        g_ancilla = QuantumRegister(self.ancilla_bits, name = 'ancilla')
-
-        # Circuit
-        qc = QuantumCircuit(g_ancilla,g_coin,g_move_value,g_move_id)
-        for i in range(self.n_angles-1,-1,-1):
-            qc = qc + QuantumCircuit(g_angles[i])
-
-        
-        # Notice that this initialization is efficient even in quantum computers if we used the Grover-Rudolph algorithm.
-        initial_angle_amplitudes, _ = self.von_mises_amplitudes()
-        for g_angle in g_angles:
-            qc.initialize(initial_angle_amplitudes, g_angle)
-
-        oracle_generator = deltas_oracle.Deltas_Oracle(self.input_oracle, in_bits = self.n_angles*self.angle_precision_bits + self.move_id_len + 1, out_bits = self.probability_bits)
-        #list_gates.append(W_gate) # We deepcopy W_gate to not interfere with other calls
-        if self.beta_type == 'fixed':
-
-            #It creates one different oracle for each beta
-            oracle = oracle_generator.generate_oracle(self.oracle_option, self.beta)
-
-        for i in range(nW):
-
-            if self.beta_type == 'variable':
-                if self.annealing_schedule == 'Cauchy' or self.annealing_schedule == 'linear':
-                    beta_value = self.beta * i 
-                elif self.annealing_schedule == 'Boltzmann' or self.annealing_schedule == 'logarithmic':
-                    beta_value = self.beta * np.log(i) + self.beta
-                elif self.annealing_schedule == 'geometric':
-                    beta_value = self.beta * self.alpha**(-i+1)
-                elif self.annealing_schedule == 'exponential': 
-                    space_dim = self.n_angles
-                    beta_value = self.beta * np.exp( self.alpha * (i-1)**(1/space_dim) )
-                else:
-                    raise ValueError('<*> ERROR: Annealing Scheduling wrong value. It should be one of [linear, logarithmic, geometric, exponential] but it is', self.annealing_schedule)
-
-                #It creates one different oracle for each beta
-                oracle = oracle_generator.generate_oracle(self.oracle_option, beta_value)
-            
-            W_gate = self.W_func_n(oracle)
-            
-            #list_gates[i].params[0]= beta
-            qc.append(W_gate, [g_ancilla[j] for j in range(self.probability_bits)] + [g_coin[0],g_move_value[0]]+ [g_move_id[j] for j in range(self.move_id_len)] +[g_angles[k][j] for (k,j) in product(range(self.n_angles-1,-1,-1), range(self.angle_precision_bits))])
-
-            qc.snapshot(label = str(i))
-
-        start_time = time.time()
+        circuit = QuantumCircuit(ancilla, coin, move_value, move_id)
+        for c in coords[::-1]: circuit.add_register(c)
 
         backend = Aer.get_backend('statevector_simulator')
+
+        # The minifold initialization initializes each angle from a VonMises distribution.
+        # Notice that this initialization is efficient even in quantum computers if we used the Grover-Rudolph algorithm.
+        initial_angle_amplitudes, _ = self.von_mises_amplitudes(n_qubits = self.angle_precision_bits, kappa = 1)
+        for c in coords: circuit.initialize(initial_angle_amplitudes, c)
+
+        # execute steps from 1 to nW
+        for step_beta in range(1, nW+1):
+                        
+            circuit.append(self.W_func(step_beta), ancilla[:]+coin[:]+move_value[:]+move_id[:]+list(itertools.chain(*coords[::-1])))
+
+            if step_beta >= 1:
+                circuit.save_statevector(label = str(step_beta))
+
+        job = execute(circuit, backend)
+
+        snapshots = {}
+        for idx in range(1, nW+1): snapshots[idx]=job.result().data().get(str(idx))
         
-        #experiment = execute(qc, backend=self.device, backend_options=self.backend_options)
-        #state_vector = Statevector(experiment.result().get_statevector(qc))
+        print("<i> Quantum Metropolis =>", nW, "steps calculated in", str(datetime.timedelta(seconds=time.time() - time_start)), "(hh:mm:ss)")
 
-        result = execute(qc, backend).result()
-        snapshots = result.data()['snapshots']['statevector']
+        # Extract probabilities in the measurement of the coords
+        return self.extract_probs_by_key(snapshots)
+    
+    def W_func(self, step_beta):
+        
+        '''This defines the parametrised gate W using the oracle that is provided to it, and we can reuse its inverse too.'''
 
-        time_statevector = time.time() - start_time
+        coords = [QuantumRegister(self.angle_precision_bits, name = 'coord_' + str(i)) for i in range(self.n_angles)]
+        move_id = QuantumRegister(self.move_id_len, name = 'move_id')
+        move_value = QuantumRegister(1, name = 'move_value')
+        coin = QuantumRegister(1, name = 'coin')
+        ancilla = QuantumRegister(self.ancilla_bits, name = 'ancilla')
+        
+        circuit = QuantumCircuit(ancilla, coin, move_value, move_id)
+        for c in coords[::-1]: circuit.add_register(c)
 
-        # Extract probabilities in the measurement of the angles phi and psi
-        #probabilities = state.probabilities([j+self.probability_bits+2+self.move_id_len for j in range(self.angle_precision_bits * self.n_angles)])
+        # Move preparation
+        circuit.append(self.move_preparation(), move_value[:]+move_id[:])
+        
+        # Coin flip  
+        circuit.append(self.coin_flip_func(step_beta), ancilla[:]+coin[:]+move_value[:]+move_id[:]+list(itertools.chain(*coords[::-1])))
+
+        # Conditional move
+        circuit.append(self.conditional_move_coord(), ancilla[:]+coin[:]+move_value[:]+move_id[:]+list(itertools.chain(*coords[::-1])))
+
+        # Inverse coin flip
+        circuit.append(self.coin_flip_func(step_beta).inverse(),ancilla[:]+coin[:]+move_value[:]+move_id[:]+list(itertools.chain(*coords[::-1])))
+
+        # Inverse move preparation
+        circuit.append(self.move_preparation().inverse(), move_value[:]+move_id[:])
+
+        # Reflection
+        circuit.append(self.reflection(), coin[:]+move_value[:]+move_id[:])
+
+        return circuit.to_instruction(label="w")
+    
+    # This method creates an uniform superposition in the register to move the random walk
+    def move_preparation(self):
+
+        move_id = QuantumRegister(self.move_id_len) 
+        move_value = QuantumRegister(1)
+
+        circuit = QuantumCircuit(move_value,move_id)
+
+        # if the successor is generated by sum/substract is necessary to include a bit is superposition 0 or 1
+        circuit.h(move_value)
+        
+        # initialize an uniform superposition with the number of coordinates and append this gate to the circuit
+        initialization_gate = initializer_coords_superposition.generate_uniform_superposition(self.n_angles, len(move_id))
+        circuit.append(initialization_gate, move_id)
+
+        return circuit.to_gate(label='move_preparation')
+
+    '''
+        Conditioned on coin, perform a move
+        It could be a swap move (exchanges positions) or sequential move (sum/substract 1 to one position)
+    '''
+    def conditional_move_coord(self):
+
+        move_id = QuantumRegister(self.move_id_len, name='move_id')
+        move_value = QuantumRegister(1, name='move_value')
+        coin = QuantumRegister(1, name='coin')
+        ancilla = QuantumRegister(self.ancilla_bits, name='ancillas')
+        coords = [QuantumRegister(self.angle_precision_bits, name = 'coord_' + str(i)) for i in range(self.n_angles)]
+
+        circuit = QuantumCircuit(ancilla, coin, move_value, move_id)
+        for c in coords[::-1]: circuit.add_register(c)
+
+        return self.sequential_move(circuit, coords, move_id, move_value, coin, ancilla)
+            
+    def reflection(self):
+
+        move_id = QuantumRegister(self.move_id_len) 
+        move_value = QuantumRegister(1)
+        coin = QuantumRegister(1)
+
+        circuit = QuantumCircuit(coin, move_value, move_id)
+
+        circuit.x(move_id)
+        circuit.x(move_value)
+        circuit.x(coin)
+        
+        # Perform a multicontrolled Z
+        circuit.h(coin[0])
+        circuit.mcx(control_qubits=move_id[:]+move_value[:], target_qubit = coin[0])
+        circuit.h(coin[0])
+        
+        circuit.x(move_id)
+        circuit.x(move_value)
+        circuit.x(coin)
+
+        return circuit.to_gate(label='reflection')
+
+    def sum1(self, coord_size):
+
+        qubit_string = QuantumRegister(coord_size, "coord")
+        control = QuantumRegister(1, "control")
+        start = QuantumRegister(1, "start")
+        end = QuantumRegister(1, "end")
+
+        circuit = QuantumCircuit(qubit_string, control, start, end)
+        
+        circuit.cx(control,end) # iff control = 1, end = 1
+        circuit.x(start)
+        circuit.cx(control,start) # iff control = 1, start = 0
+
+        for i in range(qubit_string.size,-1,-1):
+            '''
+            Next thing we analise if all qubits to the right have value 1, 
+            and save it in the current qubit and start.
+            Don't need to add control, since end already does that work
+            '''
+            control_qubits = [c for idx,c in enumerate(qubit_string) if idx!=i][::-1]+end[:]
+
+            if i < qubit_string.size:
+                # For i = 0, there is only the start to worry about
+                circuit.mcx(control_qubits=control_qubits, target_qubit = qubit_string[i])
+            circuit.mcx(control_qubits=control_qubits, target_qubit = start)
+
+            '''
+            Next, controlling on the current qubit and start, we change all the following qubits to 0.
+            We have to control with qubit_string[n_qubit], start and control because start could be at state 1 without control also being in that state.
+            '''
+            if i == qubit_string.size:
+                for j in range(i-1,-1,-1):
+                    circuit.ccx(control,start,qubit_string[j])
+                circuit.ccx(control,start,end)
+            elif i == 0:
+                circuit.mcx(control_qubits = [control,qubit_string[i],start], target_qubit = end)
+            else:
+                for j in range(i-1,-1,-1):            
+                    circuit.mcx(control_qubits = [control,qubit_string[i],start], target_qubit = qubit_string[j])
+                circuit.mcx(control_qubits = [control,qubit_string[i],start], target_qubit = end)
+        circuit.x(start)
+
+        return circuit.to_gate(label="sum1")
+
+    def sumsubtract1(self, coord_size):
+
+        qubit_string = QuantumRegister(coord_size, "coord")
+        control = QuantumRegister(1, "control")
+        start = QuantumRegister(1, "start")
+        end = QuantumRegister(1, "end")
+        move_value = QuantumRegister(1, "move_value_0")
+
+        circuit = QuantumCircuit(qubit_string, control, start, end, move_value)
+
+        circuit.cx(move_value,qubit_string)
+        circuit.append(self.sum1(coord_size), qubit_string[:]+control[:]+start[:]+end[:])
+        circuit.cx(move_value,qubit_string)
+
+        return circuit.to_gate(label="sumsubtract1")
+    
+    def sequential_move(self, circuit, coords, move_id, move_value, coin, ancilla):
+
+        # For each coordinate
+        for coord_index in range(self.n_angles):
+
+            coord = coords[coord_index] #Select the coord from the list of registers
+            coord_index_bin = np.binary_repr(coord_index, width=self.move_id_len) #convert i to binary
+
+            # Put the given move_id in all 1 to control on it: for instance if we are controling on i=2, move 010 ->111
+            for i in range(len(coord_index_bin)):
+                if coord_index_bin[i]=='0':
+                    circuit.x(move_id[i])
+
+            circuit.mcx(control_qubits=[coin[0]]+[move_id[i] for i in range(move_id.size)], target_qubit = ancilla[0])#create a single control
+            circuit.append(self.sumsubtract1(len(coord)), coord[:]+[ancilla[0]]+[ancilla[1]]+[ancilla[2]]+[move_value[0]])
+            circuit.mcx(control_qubits= [coin[0]]+[move_id[i] for i in range(move_id.size)], target_qubit = ancilla[0])#create a single control 
+
+            # Undo the move_id preparation: for instance, if we are controlling on i= 2 move 111->010
+            for i in range(len(coord_index_bin)):
+                if coord_index_bin[i]=='0':
+                    circuit.x(move_id[i])
+
+        return circuit.to_gate(label='sequential_move')
+    
+    def coin_flip(self):
+        '''
+        Prepares the coin with the probability encoded in the ancilla.
+        The important thing to notice is that we are using the same convention as qiskit: littleendian.
+        That means that the larger the index of the ancilla bit, the more significant it is, and the larger the rotation
+        '''
+        # It is necessary to use the saved number in the ancillas in order to perform controlled rotations
+        # Notice that ancilla encodes 1-probability, rather than probability.
+        # Notice also that cu3(theta) rotates theta/2. As the first coord to rotate is pi/4 we need to start in theta = pi/2
+
+        ancilla = QuantumRegister(self.ancilla_bits, name='ancillas')
+        coin = QuantumRegister(1, 'coin')
+
+        circuit = QuantumCircuit(ancilla, coin)
+
+        circuit.x(coin) # Start in 1 and decrease it, since we encoded the coord corresponding 1-probability
+        for i in range(ancilla.size-1,-1,-1): # See how to perform an rx rotation in https://qiskit.org/documentation/stubs/qiskit.circuit.library.U3Gate.html
+            circuit.cu(theta = -math.pi*2**(i-ancilla.size), phi  = 0, lam = 0, control_qubit = ancilla[i], target_qubit = coin, gamma = 0)
+    
+        return circuit.to_gate(label="coin_flip")
+
+    def coin_flip_func(self, step_beta):
+        
+        '''
+        Defines de coin_flip_gate using the oracle that is provided on the moment.
+        Notice that oracle gate has registers oracle.variable_register and oracle.output_register in that order
+        oracle.variable_register should have size coord.size + move_id.size + move_value.size
+        oracle.output_register should have size self.ancillas
+        '''
+
+        coords = [QuantumRegister(self.angle_precision_bits, name = 'coord_' + str(i)) for i in range(self.n_angles)]
+        move_id = QuantumRegister(self.move_id_len, name = 'move_id')
+        move_value = QuantumRegister(1, name = 'move_value')
+        coin = QuantumRegister(1, name = 'coin')
+        ancilla = QuantumRegister(self.ancilla_bits, name = 'ancilla')
+
+        circuit = QuantumCircuit(ancilla, coin, move_value, move_id)
+        for c in coords[::-1]: circuit.add_register(c)
+
+        # Main operations
+
+        circuit.append(self.gen_oracle(step_beta), move_value[:]+move_id[:]+list(itertools.chain(*coords[::-1]))+ancilla[:])
+        circuit.append(self.coin_flip(), ancilla[:]+coin[:])
+        circuit.append(self.gen_oracle(step_beta).inverse(), move_value[:]+move_id[:]+list(itertools.chain(*coords[::-1]))+ancilla[:])
+
+        return circuit.to_instruction(label="coin_flip_func")
+    
+    def gen_oracle(self, step_beta):
+
+        if self.beta_type == 'variable':
+                if self.annealing_schedule == 'Cauchy' or self.annealing_schedule == 'linear': beta_value = self.beta * step_beta
+                elif self.annealing_schedule == 'Boltzmann' or self.annealing_schedule == 'logarithmic': beta_value = self.beta * np.log(step_beta) + self.beta
+                elif self.annealing_schedule == 'geometric': beta_value = self.beta * self.alpha**(-step_beta+1)
+                elif self.annealing_schedule == 'exponential': beta_value = self.beta * np.exp( self.alpha * (step_beta-1)**(1/self.number_coordinates))
+                else: raise ValueError('<*> ERROR: Annealing Scheduling wrong value. It should be one of [linear, logarithmic, geometric, exponential] but it is', self.annealing_schedule)
+        
+        elif self.beta_type == 'fixed':
+            beta_value = self.beta_value
+
+        out_bits = self.ancilla_bits
+        prec_coords = self.angle_precision_bits
+
+        return oracle.Oracle(self.input_oracle, self.n_angles, self.angle_precision_bits, out_bits, prec_coords).generate_oracle(beta_value)
+
+    def von_mises_amplitudes(self, n_qubits, kappa):
 
         probs = {}
-        number_bits_angles = self.angle_precision_bits * self.n_angles
+        probs[0] = vonmises.cdf(np.pi/2**n_qubits, kappa) - vonmises.cdf(-np.pi/2**n_qubits, kappa)
+        probs[2**n_qubits/2] = 2* vonmises.cdf(np.pi/2**n_qubits - np.pi, kappa)
+        
+        for i in range(1, 2**n_qubits//2):
+            p = vonmises.cdf((2*i+1)*np.pi/2**n_qubits, kappa)-vonmises.cdf((2*i-1)*np.pi/2**n_qubits, kappa)
+            probs[i] = p
+            probs[-i + 2**n_qubits ] = p
+
+        pr = []
+        aa = []
+        acc = []
+
+        for i in range(2**n_qubits):
+            pr.append(probs[i])
+
+        for i in range(2**n_qubits):
+            aa.append(np.sqrt(probs[i]))
+            acc.append(np.sum(pr[:i]))
+            
+        acc.append(np.sum(pr)) # This should append 1
+        acc = acc[1:] # We are not interested in the first item, which is 0
+
+        return aa, acc
+    
+    def extract_probs_by_key(self, snapshots):
+
+        probs = {}
 
         for i, state_vector in snapshots.items():
             int_i = int(i)
             probs[int_i] = {}
 
-            state_vector = Statevector(snapshots[i][0])
+            state_vector = Statevector(snapshots[i])
 
             total_bits = state_vector.num_qubits
-            angle_qubits = [qubit_index for qubit_index in range ((total_bits - number_bits_angles), total_bits)]
-            probabilities = state_vector.probabilities(angle_qubits)
+            coord_qubits = [qubit_index for qubit_index in range (total_bits)]
+            probabilities = state_vector.probabilities(coord_qubits)
         
-            for index_probabilites in range(2**(self.angle_precision_bits *self.n_angles)):
+            for index_probabilites in range(2**len(coord_qubits)):
 
-                key = self.convert_index_to_key(index_probabilites, self.angle_precision_bits, self.n_angles)
-                probs[int_i][key] = probabilities[index_probabilites]#.as_integer
+                if probabilities[index_probabilites] > 1e-10:
 
-        probs = OrderedDict(sorted(probs.items()))
+                    bin_key = bin(index_probabilites)[2:].zfill(total_bits)
 
-        return [probs, time_statevector]
+                    formated_bin_key = ''
+                    index_format = 0
+
+                    for _ in range(self.n_angles):
+
+                        formated_bin_key += bin_key[index_format:index_format+self.angle_precision_bits] +'-'
+                        index_format += self.angle_precision_bits
+
+                    formated_bin_key = formated_bin_key[:-1] + '||'
+
+                    formated_bin_key += bin_key[index_format:index_format+self.move_id_len]
+                    index_format += self.move_id_len
+
+                    formated_bin_key += '|' + bin_key[index_format] + '|' + bin_key[index_format+1]
+                    index_format += self.move_id_len
+
+                    formated_bin_key += '||' + bin_key[index_format:index_format]+'-'+bin_key[index_format:]
+            
+                    key = self.convert_index_to_key(formated_bin_key, self.angle_precision_bits, self.n_angles)
+
+                    if key in probs[int_i].keys():
+                        probs[int_i][key] += probabilities[index_probabilites]
+                    else:
+                        probs[int_i][key] = probabilities[index_probabilites]
+
+        return probs
     
-    def von_mises_amplitudes():
-        pass
+    # this method converts the index returned by statevector into a string key. 
+    # for example: key 10 is converted to 22 if there are two coords and two precision bits
+    # for example: key 8 is converted to 0010 if there are four coords and three precision bits
+    def convert_index_to_key(self, key_int, precision_bits, n_coords):
+
+        key_str = ''
+        coords = key_int.split('||')[0].split('-')
+        for c in coords: key_str += str(int(c, 2))+'-'
+
+        return key_str[:-1]

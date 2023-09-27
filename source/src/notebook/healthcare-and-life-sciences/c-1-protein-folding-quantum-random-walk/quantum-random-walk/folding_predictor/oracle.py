@@ -1,29 +1,20 @@
-from qiskit.circuit import QuantumRegister, QuantumCircuit
+from sympy.combinatorics.graycode import GrayCode, gray_to_bin, bin_to_gray
+from qiskit.circuit import QuantumRegister, ClassicalRegister, QuantumCircuit, Qubit
 from collections import OrderedDict
+from qiskit import Aer, transpile
 
 import math
 import numpy as np
 
-class Deltas_Oracle():
-    '''Outputs the binary angle of rotation to get the correct probability. Tested ok'''
-    def __init__(self, deltas_dictionary, in_bits, out_bits):
+class Oracle():
+    '''Outputs the binary coord of rotation to get the correct probability. Tested ok'''
+    def __init__(self, deltas_dictionary, n_angles, angle_precision_bits, out_bits, precision_coords, optimization=False, mct_mode='noancilla'):
 
         self.out_bits = out_bits
         self.deltas_dictionary = OrderedDict(sorted(deltas_dictionary.items()))
-
-        # If there are only two angles, we need to eliminate the penultimate digit of the keys:
-        if len(list(self.deltas_dictionary.keys())[0]) == in_bits + 1:
-            deltas = {}
-            for (key, value) in list(self.deltas_dictionary.items()):
-                deltas[key[:-2]+key[-1]] = value
-            self.deltas_dictionary = deltas
-
-    def generate_oracle(self, beta):
-
-        angles = self.generate_angles_codification(beta)
-        oracle_circuit = self.generate_qfold_oracle(angles)
-
-        return oracle_circuit.to_instruction()
+        self.n_angles = n_angles
+        self.angle_precision_bits = angle_precision_bits
+        self.precision_coords = precision_coords
 
     def generate_angles_codification(self, beta):
 
@@ -53,13 +44,19 @@ class Deltas_Oracle():
             # angle will be between 0 and 1, so we move it to between 0 and 2^out_bits. Then calculate the integer and the binary representation
             angles[key] = np.binary_repr(int(angle*2**self.out_bits), width= self.out_bits)
 
+            #if key[:10] == '1101000101':
+            #    print('<DEBUG> For key:', key, 'angle is:', angles[key])
+
         self.angles = angles
 
         return angles
 
-    def generate_qfold_oracle(self, angles):
+    def generate_oracle(self, beta):
+
+        angles = self.generate_angles_codification(beta)
 
         # create a quantum circuit with the same length than the key of the deltas energies
+
         oracle_key = QuantumRegister(len(list(self.deltas_dictionary.keys())[0]))
         oracle_value = QuantumRegister(len(list(angles.values())[0]))
         oracle_circuit = QuantumCircuit(oracle_key, oracle_value)
@@ -84,4 +81,43 @@ class Deltas_Oracle():
                 if key[(len_key-1) - key_bit_index] == '0':
                     oracle_circuit.x(oracle_key[key_bit_index])
 
-        return oracle_circuit
+        return oracle_circuit.to_instruction()
+
+    # convert the interger key of the deltas dict in binary key
+    # format of deltas key coord1-coord2-coord3-...|id(integer)|plusminus
+    def key_to_binary(self, key):
+
+        binary_key = ''
+
+        coords = key.split('|')[0].split('-')
+        id_integer = int(key.split('|')[1])
+        plus_minus = key.split('|')[2]
+
+        for coord_index in range(len(coords)):
+            binary_key += np.binary_repr(int(coords[coord_index]), width = int(self.precision_coords[coord_index]))
+
+        if len(self.precision_coords) == 1:
+            binary_key += '0'
+        else:
+            number_bits_to_represent_id = int(math.ceil(np.log2(len(self.precision_coords))))
+            binary_key += np.binary_repr(id_integer, width=number_bits_to_represent_id)
+
+        binary_key += plus_minus
+
+        return binary_key
+
+    def execute_x_multiple_register(self, circuit, target, target_value, index, direction):
+
+        if direction == 'fordward':
+
+            for i in range(len(index)):
+                if index[i] == target_value:
+                    circuit.x(target[i])
+
+        elif direction == 'backward':
+
+            for i in range(len(index)):
+                if index[len(index)-i-1] == target_value:
+                    circuit.x(target[i])
+        else:
+            raise Exception("Wrong direction value")
