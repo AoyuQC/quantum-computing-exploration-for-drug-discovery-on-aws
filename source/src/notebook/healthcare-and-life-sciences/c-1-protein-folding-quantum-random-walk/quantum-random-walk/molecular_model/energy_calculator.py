@@ -1,6 +1,9 @@
+import copy
 import json
 import math
+import subprocess
 import numpy as np
+import tqdm as tqdm
 
 class Energy_Calculator():
 
@@ -25,10 +28,10 @@ class Energy_Calculator():
 
         return energy
     
-    def execute_psi_command():
+    def execute_psi_command(self):
 
         # execute psi4 by command line (it generates the file output.dat with the information)
-        return NotImplementedError
+        subprocess.run(['./psi4/psi4conda/bin/psi4','-n', str(8), self.input_filename+".dat", self.output_filename+".dat"], stdout=subprocess.DEVNULL)
     
     def write_file_energies(self, atoms):
 
@@ -96,7 +99,7 @@ class Energy_Calculator():
             if old_energy < min_energy:
                 min_energy = old_energy
                 index_min_energy = e_key
-            
+
             angle_keys = e_key.split(' ')
             # iterate over all angles keys
             for index_a_key in range(len(angle_keys)):
@@ -129,7 +132,7 @@ class Energy_Calculator():
                     else:
                         # if it is odd number is psi (add 1)
                         binary_key += str(1)
-                    
+
                     # add the index of the phi/psi angle (with more than 2 aminoacids, there are more than one phi/psi)
                     binary_key += np.binary_repr(int(index_a_key/2), width = bits_number_angles)
 
@@ -137,7 +140,7 @@ class Energy_Calculator():
                     binary_key += str(plusminus)
 
                     delta = new_energy - old_energy
-                    
+
                     #Add the values to the file with the precalculated energies
                     deltas_json['deltas'][binary_key] = delta
 
@@ -146,6 +149,195 @@ class Energy_Calculator():
 
         return deltas_json
     
+    # RECURSIVE function to calculate all energies of each possible rotation 
+    def calculate_all_energies(self, atoms, rotation_steps, protein_sequence_length, max_lenght, aminoacids, index_sequence='', pbar=None, energies={}):
+
+        if pbar is None: pbar = tqdm.tqdm(total=rotation_steps**protein_sequence_length, desc=f"Calculating energy of each position")
+
+        # iterate to calculate all possible rotations
+        # for example if there are 4 rotation steps, it executes the loop 4 times, but in each iteration, it calls recursively to all rotations starting with 0 (first iteration)  
+        for index in range(rotation_steps):
+
+            if protein_sequence_length > 0:
+                # returned energy is added to a data structure (this structure is multi-dimensional)
+                # index_sequence contains the accumulated index (it helps to know the general index_sequence)
+                energies = self.calculate_all_energies(atoms, rotation_steps, protein_sequence_length-1, max_lenght, aminoacids, index_sequence+str(index)+' ', pbar, energies)
+            
+            else:
+                
+                #Perform the rotations over a copy
+                copied_atoms = copy.deepcopy(atoms)
+                for at in copied_atoms:
+                    if at.c_type == 'N_backbone' and ((len(at.linked_to_dict['C']) == 1 and len(at.linked_to_dict['H']) == 2) or self.is_proline_N(at)):
+                        nitro_start = at
+                        break
+
+                copied_backbone = self.main_chain_builder([nitro_start], aminoacids)
+
+                x_values = []
+                y_values = []
+
+                # remove last whitespace
+                index_sequence = index_sequence.strip()
+                index_values = index_sequence.split(' ')
+                for index in range(len(index_values)):
+
+                    if index%2 == 0:
+                        # rotation sequence even (0, 2, 4, ...)
+                        x_values.append(int(index_values[index])) 
+
+                    if index%2 != 0:
+                        # rotation sequence odd (1, 3, 5, ...)
+                        y_values.append(int(index_values[index]))
+
+                for index in range(len(x_values)):
+
+                    #Always rotate from state (0,0) angle_type, angle, starting_atom, backbone
+                    self.rotate(angle_type='psi', angle=(y_values[index]/rotation_steps) * 2*math.pi, starting_atom = copied_backbone[3*index + 2], backbone = copied_backbone)
+                    self.rotate(angle_type='phi', angle=(x_values[index]/rotation_steps) * 2*math.pi, starting_atom = copied_backbone[3*index + 4], backbone = copied_backbone) 
+                    
+                
+                #Calculate the energy of the protein structure after the previous rotations
+                energies[index_sequence] = self.calculate_energy_of_rotations(copied_atoms)
+                pbar.update(1)
+
+                # We eliminate previous copies
+                del copied_atoms
+                del copied_backbone
+
+                break
+
+        return energies
+
+    def is_proline_N(self, atom):
+
+        carbon_ring = []
+
+        if atom.element != 'N' or len(atom.linked_to_dict['C']) != 2 or len(atom.linked_to_dict['H'])!=1:
+            return False
+        else:
+            carbons = atom.linked_to_dict['C']
+            if len(carbons[0].linked_to_dict['C']) == 1  and len(carbons[0].linked_to_dict['N']) == 1 and len(carbons[1].linked_to_dict['C']) == 2 and len(carbons[1].linked_to_dict['N']) == 1:
+                current_carbon = carbons[0]
+                ending_carbon = carbons[1]
+            elif len(carbons[1].linked_to_dict['C']) == 1  and len(carbons[1].linked_to_dict['N']) == 1 and len(carbons[0].linked_to_dict['C']) == 2 and len(carbons[0].linked_to_dict['N']) == 1:
+                current_carbon = carbons[1]
+                ending_carbon = carbons[0]
+            else:
+                return False
+            
+            for _ in range(2):
+                carbon_ring.append(current_carbon)
+                current_carbon = (current_carbon.linked_to_dict['C'][0] if current_carbon.linked_to_dict['C'][0] not in carbon_ring else current_carbon.linked_to_dict['C'][1])
+                if len(current_carbon.linked_to_dict['C']) != 2 or len(current_carbon.linked_to_dict['N']) != 0 or len(current_carbon.linked_to_dict['O']) != 0 or len(current_carbon.linked_to_dict['H']) != 2:
+                    return False
+                
+            return (True if current_carbon in ending_carbon.linked_to else False)
+
+    def main_chain_builder(self, nitrogen_starts, aminoacids):
+        '''Takes all the nitrogens that are only connected to a single C and returns the backbone of the protein'''
+        best_chains = []
+        len_best_chain = 0
+        for nitro in nitrogen_starts:
+            candidate_chain = []
+            nit = nitro
+
+            for amino_index in range(len(aminoacids)):
+
+                aminolist = []
+                aminolist.append(nit)
+
+                # Searching for C-alpha
+                carbons = nit.linked_to_dict['C']
+                carbons_not_in_chain = [carbon for carbon in carbons if (carbon not in candidate_chain and carbon not in aminolist)]
+                if (len(carbons_not_in_chain)==1 and aminoacids[amino_index] != 'P'):
+                    car_alpha = carbons_not_in_chain[0]
+                    aminolist.append(car_alpha)
+                elif (len(carbons_not_in_chain)==2 and aminoacids[amino_index] == 'P'):
+                    car_alpha = (carbons_not_in_chain[0] if (len(carbons_not_in_chain[0].linked_to_dict['N']) == 1 and len(carbons_not_in_chain[0].linked_to_dict['C']) == 2 and len(carbons_not_in_chain[0].linked_to_dict['H']) == 1) else carbons_not_in_chain[1])
+                    aminolist.append(car_alpha)
+                else:
+                    break
+
+                # Searching for Carboxy
+                carbons = car_alpha.linked_to_dict['C']
+                carboxys_not_in_chain = [carbon for carbon in carbons if (carbon not in candidate_chain and carbon not in aminolist and len(carbon.linked_to_dict['O']) > 0)]
+                if amino_index+1 < len(aminoacids):
+                    carboxys_not_in_chain = [carbox for carbox in carboxys_not_in_chain if len(carbox.linked_to_dict['N']) > 0]
+                if len(carboxys_not_in_chain)==1:
+                    carbox = carboxys_not_in_chain[0]
+                    aminolist.append(carbox)
+                else:
+                    break
+
+                #We have a full aminoacid, so we save it to the candidate list
+                candidate_chain += aminolist
+
+                # Searching for next aminoacid Nitrogen
+                nitrogens = carbox.linked_to_dict['N']
+                nitrogens_not_in_chain = [n for n in nitrogens if (n not in candidate_chain and n not in aminolist)]
+                if len(nitrogens_not_in_chain)==1:
+                    nit = nitrogens_not_in_chain[0]
+                else:
+                    break
+
+            # Is the found chain longer than the one we already had?
+            if len(candidate_chain) > len_best_chain:
+                len_best_chain = len(candidate_chain)
+                best_chains = [candidate_chain]
+            elif len(candidate_chain) == len_best_chain:
+                best_chains.append(candidate_chain)
+            else: 
+                pass
+
+        if len(best_chains) != 1 or len(best_chains[0])//3 != len(aminoacids):
+            raise ValueError('There should be a single lengthy chain!', best_chains, nitrogen_starts)
+        else:
+            return best_chains[0]
+    
+    def rotate(self, angle_type, angle, starting_atom, backbone):
+
+        previous_atom = backbone[backbone.index(starting_atom)-1]
+
+        if angle_type == 'phi':
+            if previous_atom.c_type != 'N_backbone' or starting_atom.c_type != 'C_alpha':
+                raise Exception('Wrong starting atom for the angle phi:',starting_atom.c_type,'or wrong previous atom',previous_atom.c_type )
+                    
+        elif angle_type == 'psi':
+            if previous_atom.c_type != 'C_alpha' or starting_atom.c_type != 'Carboxy':
+                raise Exception('Wrong starting atom for the angle phi:',starting_atom.c_type )
+
+        else:
+            raise Exception('Angle not recognised!:',angle_type)
+        
+        # Define the list of atoms to rotate and then rotate them
+        
+        backbone2rotate = backbone[backbone.index(starting_atom)+1:]
+        ##self.backbone_to_rotate(angle_type,starting_atom, backbone)
+        list_of_atoms_to_rotate = self.decorations_to_rotate(backbone2rotate,backbone)
+
+        for atom in list_of_atoms_to_rotate:
+            # The axis is defined by the starting atom and the atom prior to the starting atom in the backbone
+            atom.rotate(previous_atom, starting_atom, angle, angle_type)
+
+    def decorations_to_rotate(self, backbone2rotate, backbone):
+        
+        atoms2rotate = backbone2rotate
+
+        newly_added = backbone2rotate
+
+        while newly_added != []:
+            previously_added = newly_added
+            newly_added = []
+            for atom in previously_added:
+                for at2 in atom.linked_to:
+                    if at2 not in atoms2rotate and at2 not in newly_added and at2 not in backbone:
+                        newly_added.append(at2)
+
+            atoms2rotate += newly_added 
+        
+        return atoms2rotate
+
     def write_json(self, json_data, file_name, proteinName, numberBitsRotation, method_rotations_generation):
 
         #Create json with calculated energies

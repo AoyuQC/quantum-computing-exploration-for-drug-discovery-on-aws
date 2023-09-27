@@ -1,0 +1,10 @@
+prefix=/home/rco/Desktop/projects/qfold/quantum-computing-exploration-for-drug-discovery-on-aws/source/src/notebook/healthcare-and-life-sciences/c-1-protein-folding-quantum-random-walk/quantum-random-walk/psi4/psi4conda
+exec_prefix=/home/rco/Desktop/projects/qfold/quantum-computing-exploration-for-drug-discovery-on-aws/source/src/notebook/healthcare-and-life-sciences/c-1-protein-folding-quantum-random-walk/quantum-random-walk/psi4/psi4conda
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: libint2
+Description: a library for the evaluation of molecular integrals of many-body operators over Gaussian functions
+Version: 2.7.2
+Libs: -L${libdir} -lint2
+Cflags: -I${includedir} -I${includedir}/libint2

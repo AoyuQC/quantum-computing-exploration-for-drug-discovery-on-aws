@@ -1,6 +1,4 @@
-import copy
 import math
-import random
 import numpy as np
 
 from classical_ML_model import minifold
@@ -110,6 +108,24 @@ class Structure_Calculator():
             self.rotate(angle_type ='phi', angle = -1*phi_angles_psi4[i], starting_atom = backbone[3*i+4], backbone = backbone)
 
         return atoms
+    
+    def decorations_to_rotate(self, backbone2rotate, backbone):
+        
+        atoms2rotate = backbone2rotate
+
+        newly_added = backbone2rotate
+
+        while newly_added != []:
+            previously_added = newly_added
+            newly_added = []
+            for atom in previously_added:
+                for at2 in atom.linked_to:
+                    if at2 not in atoms2rotate and at2 not in newly_added and at2 not in backbone:
+                        newly_added.append(at2)
+
+            atoms2rotate += newly_added 
+        
+        return atoms2rotate
     
     def rotate(self, angle_type, angle, starting_atom, backbone):
 

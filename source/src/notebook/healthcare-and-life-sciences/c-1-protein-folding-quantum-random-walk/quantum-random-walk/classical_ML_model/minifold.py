@@ -1,14 +1,15 @@
 import os.path
-from keras.models import load_model
 import numpy as np
-from keras.losses import mean_squared_error, mean_absolute_error
-import minifoldTrainer
 
+from keras.models import load_model
+from keras.losses import mean_squared_error, mean_absolute_error
+
+from . import minifoldTrainer
 class Minifold:
 
     def __init__(self, model_path, window_size, max_aa_length, path_input_file, epochs_train_classical_folding_model, batch_size_classical_folding_model):
 
-        self.model_path = model_path+'protein_under_'+str(max_aa_length)+'.h5'
+        self.model_path = '../'+model_path+'protein_under_'+str(max_aa_length)+'.h5'
         self.window_size = window_size
         self.max_aa_length = max_aa_length
         self.path_input_file = path_input_file
@@ -22,7 +23,7 @@ class Minifold:
 
             print('<i> WARNING: Knowledge model not existing!')
             
-            minifold = minifoldTrainer.MinifoldTrainer(
+            mfold_trainer = minifoldTrainer.MinifoldTrainer(
                 self.path_input_file,
                 self.model_path,
                 self.max_aa_length,
@@ -30,7 +31,7 @@ class Minifold:
                 self.epochs_train_classical_folding_model,
                 self.batch_size_classical_folding_model,
                 )
-            minifold.train()
+            mfold_trainer.train()
 
     def predictAngles(self, aminoacids):
 

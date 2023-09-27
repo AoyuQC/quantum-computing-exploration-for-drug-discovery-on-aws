@@ -1,0 +1,10 @@
+prefix=/home/rco/Desktop/projects/qfold/quantum-computing-exploration-for-drug-discovery-on-aws/source/src/notebook/healthcare-and-life-sciences/c-1-protein-folding-quantum-random-walk/quantum-random-walk/psi4/psi4conda
+exec_prefix=${prefix}
+includedir=${prefix}/include
+libdir=${exec_prefix}/lib
+
+Name: LibYAML
+Description: Library to parse and emit YAML
+Version: 0.2.5
+Cflags: -I${includedir}
+Libs: -L${libdir} -lyaml

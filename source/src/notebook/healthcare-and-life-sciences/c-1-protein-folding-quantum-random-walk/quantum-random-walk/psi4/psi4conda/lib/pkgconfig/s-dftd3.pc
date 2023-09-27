@@ -1,0 +1,11 @@
+prefix=/home/rco/Desktop/projects/qfold/quantum-computing-exploration-for-drug-discovery-on-aws/source/src/notebook/healthcare-and-life-sciences/c-1-protein-folding-quantum-random-walk/quantum-random-walk/psi4/psi4conda
+includedir=${prefix}/include
+libdir=${prefix}/lib
+
+Name: s-dftd3
+Description: Simple reimplementation of the DFT-D3 dispersion model
+Version: 0.7.0
+Requires.private: mctc-lib >= 0.3.0
+Libs: -L${libdir} -ls-dftd3
+Libs.private: -fopenmp -lblas
+Cflags: -I${includedir} -I${includedir}/s-dftd3/gcc-11.3.0

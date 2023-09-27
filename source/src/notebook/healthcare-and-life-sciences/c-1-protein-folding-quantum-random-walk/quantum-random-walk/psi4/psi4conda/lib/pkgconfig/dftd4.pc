@@ -1,0 +1,11 @@
+prefix=/home/rco/Desktop/projects/qfold/quantum-computing-exploration-for-drug-discovery-on-aws/source/src/notebook/healthcare-and-life-sciences/c-1-protein-folding-quantum-random-walk/quantum-random-walk/psi4/psi4conda
+includedir=${prefix}/include
+libdir=${prefix}/lib
+
+Name: dftd4
+Description: Generally Applicable Atomic-Charge Dependent London Dispersion Correction
+Version: 3.5.0
+Requires.private: mctc-lib >= 0.3.0
+Libs: -L${libdir} -ldftd4
+Libs.private: -fopenmp -llapack -lblas -fopenmp
+Cflags: -I${includedir} -I${includedir}/dftd4/gcc-11.3.0

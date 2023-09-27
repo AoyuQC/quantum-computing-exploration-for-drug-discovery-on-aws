@@ -1,0 +1,82 @@
+'\" t
+.\"     Title: mctc-gcp
+.\"    Author: [see the "AUTHOR(S)" section]
+.\" Generator: Asciidoctor 2.0.17
+.\"      Date: 2021-11-15
+.\"    Manual: \ \&
+.\"    Source: \ \&
+.\"  Language: English
+.\"
+.TH "MCTC\-GCP" "1" "2021-11-15" "\ \&" "\ \&"
+.ie \n(.g .ds Aq \(aq
+.el       .ds Aq '
+.ss \n[.ss] 0
+.nh
+.ad l
+.de URL
+\fI\\$2\fP <\\$1>\\$3
+..
+.als MTO URL
+.if \n[.g] \{\
+.  mso www.tmac
+.  am URL
+.    ad l
+.  .
+.  am MTO
+.    ad l
+.  .
+.  LINKSTYLE blue R < >
+.\}
+.SH "NAME"
+mctc-gcp \- Geometrical counterpoise correction program.
+.SH "SYNOPSIS"
+.sp
+\fBmctc\-gcp\fP [\fIoptions\fP] \fIinput\fP
+.SH "DESCRIPTION"
+.sp
+Takes an geometry input to calculate the counterpoise correction.
+Periodic calculations are performed automatically for periodic input formats
+Specify the level of your calculation to select the correct parameters.
+.SH "OPTIONS"
+.sp
+\fB\-i, \-\-input\fP \fIformat\fP
+.RS 4
+Hint for the format of the input file
+.RE
+.sp
+\fB\-l, \-\-level\fP \fImethod\fP
+.RS 4
+specify method to correct for,
+if not present or set to \fIfile\fP, local parameters are used,
+local parameters are read from \f(CR~/.gcppar.$HOSTNAME\fP
+.RE
+.sp
+\fB\-\-grad\fP
+.RS 4
+request gradient evaluation
+.RE
+.sp
+\fB\-\-hess\fP
+.RS 4
+request hessian evaluation
+.RE
+.sp
+\fB\-\-noprint\fP
+.RS 4
+Reduce printout, only print warnings
+.RE
+.sp
+\fB\-\-parfile\fP
+.RS 4
+write \f(CRgcp.param\fP file
+.RE
+.sp
+\fB\-\-version\fP
+.RS 4
+Print program version and exit
+.RE
+.sp
+\fB\-\-help\fP
+.RS 4
+Show this help message
+.RE

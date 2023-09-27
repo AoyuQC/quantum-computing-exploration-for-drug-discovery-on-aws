@@ -1,0 +1,139 @@
+# dkhConfig.cmake
+# ---------------
+#
+# DKH cmake module.
+# This module sets the following variables in your project::
+#
+#   dkh_FOUND - true if dkh and all required components found on the system
+#   dkh_VERSION - dkh version in format Major.Minor.Release. Prefer target variable.
+#   dkh_INCLUDE_DIRS - Directories where dkh header and andy dependent headers are located. Prefer targets.
+#   dkh_INCLUDE_DIR - Directories where dkh header is located. Prefer targets.
+#   dkh_DEFINITIONS: Definitions necessary to use dkh, namely USING_dkh.
+#   dkh_LIBRARIES - dkh library to link against plus any dependent libraries. Prefer targets.
+#   dkh_LIBRARY - dkh library to link against. Prefer targets.
+#
+#
+# Target variables:
+#
+# It is preferred to use properties set on the base target rather than using the above variables.
+#
+# ::
+#
+#   dkh_VERSION - dkh version in format Major.Minor.Release
+#
+#   get_property(_ver TARGET dkh::dkh PROPERTY dkh_VERSION)
+#
+#
+# Available components: shared static ::
+#
+#   shared - search for only shared library
+#   static - search for only static library
+#
+#
+# Exported targets::
+#
+# If dkh is found, this module defines the following :prop_tgt:`IMPORTED`
+# target. Note that if dkh library is static, importing project must
+# declare Fortran as a language in order to populate the link libs. ::
+#
+#   dkh::dkh - the main dkh library with header, defs, & linker lang attached.
+#
+#
+# Suggested usage::
+#
+#   find_package(dkh)
+#   find_package(dkh 1.2 EXACT CONFIG REQUIRED COMPONENTS static)
+#
+#
+# The following variables can be set to guide the search for this package::
+#
+#   dkh_DIR - CMake variable, set to directory containing this Config file
+#   CMAKE_PREFIX_PATH - CMake variable, set to root directory of this package
+#   PATH - environment variable, set to bin directory of this package
+#   CMAKE_DISABLE_FIND_PACKAGE_dkh - CMake variable, disables
+#     find_package(dkh) when not REQUIRED, perhaps to force internal build
+
+
+####### Expanded from @PACKAGE_INIT@ by configure_package_config_file() #######
+####### Any changes to this file will be overwritten by the next CMake run ####
+####### The input file was dkhConfig.cmake.in                            ########
+
+get_filename_component(PACKAGE_PREFIX_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../" ABSOLUTE)
+
+macro(set_and_check _var _file)
+  set(${_var} "${_file}")
+  if(NOT EXISTS "${_file}")
+    message(FATAL_ERROR "File or directory ${_file} referenced by variable ${_var} does not exist !")
+  endif()
+endmacro()
+
+macro(check_required_components _NAME)
+  foreach(comp ${${_NAME}_FIND_COMPONENTS})
+    if(NOT ${_NAME}_${comp}_FOUND)
+      if(${_NAME}_FIND_REQUIRED_${comp})
+        set(${_NAME}_FOUND FALSE)
+      endif()
+    endif()
+  endforeach()
+endmacro()
+
+####################################################################################
+
+set(dkh dkh)  # NameSpace
+
+# check library style component
+if (ON)  # BUILD_SHARED_LIBS
+    set(${dkh}_shared_FOUND 1)
+else()
+    set(${dkh}_static_FOUND 1)
+endif()
+list(FIND ${dkh}_FIND_COMPONENTS "shared" _seek_shared)
+list(FIND ${dkh}_FIND_COMPONENTS "static" _seek_static)
+
+# make detectable the various cmake modules exported alongside
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR})
+
+# check library dependency available
+include(CMakeFindDependencyMacro)
+if(NOT TARGET tgt::lapack)
+    find_dependency(TargetLAPACK)
+endif()
+
+# Check all required components are available before trying to load any
+check_required_components(${dkh})
+
+#-----------------------------------------------------------------------------
+# Don't include targets if this file is being picked up by another
+# project which has already built this as a subproject
+#-----------------------------------------------------------------------------
+if(NOT TARGET ${dkh}::dkh)
+    include("${CMAKE_CURRENT_LIST_DIR}/${dkh}Targets.cmake")
+
+    get_property(_loc TARGET ${dkh}::dkh PROPERTY LOCATION)
+    get_property(_ill TARGET ${dkh}::dkh PROPERTY INTERFACE_LINK_LIBRARIES)
+    get_property(_iid TARGET ${dkh}::dkh PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
+    get_property(_icd TARGET ${dkh}::dkh PROPERTY INTERFACE_COMPILE_DEFINITIONS)
+    set(${dkh}_LIBRARY ${_loc})
+    set(${dkh}_LIBRARIES ${_loc};${_ill})
+    set(${dkh}_INCLUDE_DIR ${_iid})
+    set(${dkh}_INCLUDE_DIRS ${_iid})
+    set(${dkh}_DEFINITIONS ${_icd})
+
+    if (CMAKE_VERSION VERSION_GREATER 3.15)
+        message(VERBOSE "dkh::dkh")
+
+        get_property(_ver TARGET ${dkh}::dkh PROPERTY dkh_VERSION)
+        message(VERBOSE "${dkh}::dkh.${dkh}_VERSION ${_ver}")
+
+        message(VERBOSE "${dkh}_FOUND                  ${${dkh}_FOUND}")
+        message(VERBOSE "${dkh}_VERSION                ${${dkh}_VERSION}")
+        message(VERBOSE "${dkh}_DEFINITIONS            ${${dkh}_DEFINITIONS}")
+
+        message(VERBOSE "${dkh}_LIBRARY                ${${dkh}_LIBRARY}")
+        message(VERBOSE "${dkh}_LIBRARIES              ${${dkh}_LIBRARIES}")
+        message(VERBOSE "${dkh}_INCLUDE_DIR            ${${dkh}_INCLUDE_DIR}")
+        message(VERBOSE "${dkh}_INCLUDE_DIRS           ${${dkh}_INCLUDE_DIRS}")
+    endif()
+
+endif()
+

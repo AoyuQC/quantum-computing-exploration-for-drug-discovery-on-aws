@@ -13,7 +13,7 @@ import math
 from keras.optimizers import Adam
 
 # Model architecture
-from resnet_1d_angles import resnet_v2, custom_mse_mae
+from . import resnet_1d_angles
 
 class MinifoldTrainer():
     
@@ -209,15 +209,18 @@ class MinifoldTrainer():
         ## LOADING MODEL ##
 
         # Using AMSGrad optimizer for speed 
-        adam = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, decay=0.0, amsgrad=True)
+        adam = Adam(lr=0.001, beta_1=0.9, beta_2=0.999, amsgrad=True)
         # Create model
-        model = resnet_v2(input_shape=(self.window_size*2,22), depth=20, num_classes=4, conv_first=True)
-        model.compile(optimizer=adam, loss=custom_mse_mae, metrics=["mean_absolute_error", "mean_squared_error"])
+        model = resnet_1d_angles.resnet_v2(input_shape=(self.window_size*2,22), depth=20, num_classes=4, conv_first=True)
+        model.compile(optimizer=adam, loss=resnet_1d_angles.custom_mse_mae, metrics=["mean_absolute_error", "mean_squared_error"])
 
         # Resnet (pre-act structure) with windows_size*22 columns as inputs - leaving a subset for validation
         model.fit(x_train, y_train, epochs=self.epochs, batch_size=self.batch_size, verbose=1, shuffle=True, validation_data=(x_test, y_test))
 
-        model.save('../'+self.model_path+'protein_under_'+str(self.max_aa_length)+'.h5')
+        print('model path', self.model_path)
+        print('aa_length', self.max_aa_length)
+
+        model.save(self.model_path)
 
 
     # Helper function to save data to a .txt file

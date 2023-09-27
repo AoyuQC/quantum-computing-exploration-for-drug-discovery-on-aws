@@ -6,9 +6,8 @@ from keras.models import Model
 from keras.regularizers import l2
 from keras.losses import mean_squared_error, mean_absolute_error
 # Keras layers
-from keras.layers.convolutional import Conv1D
-from keras.layers import Dense, Dropout, Flatten, Input, BatchNormalization, Activation
-from keras.layers.pooling import MaxPooling1D, AveragePooling1D
+from keras.layers import Conv1D
+from keras.layers import Dense, Flatten, Input, BatchNormalization, Activation, Conv1D, AveragePooling1D
 
 
 def custom_mse_mae(y_true, y_pred):
